@@ -2,4 +2,5 @@ openai-agents>=0.14.0
 chainlit
 crawl4ai
 python-dotenv
-asyncio
+httpx
+playwright==1.60.0
