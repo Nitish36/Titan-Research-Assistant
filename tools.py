@@ -65,28 +65,28 @@ async def scrape_source_tool(url: str, source_title: str) -> str:
     Crawls a target page using Crawl4AI and displays dynamic progress in Chainlit.
     """
     domain = url.split("//")[-1].split("/")[0]
-
+    
     async with cl.Step(name=f"🕷️ Crawling {domain}", type="tool") as step:
         step.input = url
-
+        
         browser_cfg = BrowserConfig(headless=True, verbose=False)
         run_cfg = CrawlerRunConfig(cache_mode=CacheMode.BYPASS)
-
+        
         async with AsyncWebCrawler(config=browser_cfg) as crawler:
             result = await crawler.arun(url=url, config=run_cfg)
             if result.success:
                 word_count = len(result.markdown.split())
                 step.output = f"Successfully scraped {word_count} words of text context."
-
-                # Render raw Markdown on the collapsible Side Panel
+                
+                # FIX: Pass for_id=step.id so Chainlit binds the element correctly
                 raw_source_element = cl.Text(
                     name=f"Source: {source_title}",
                     content=result.markdown,
                     display="side",
                     language="markdown"
                 )
-                await raw_source_element.send()
-
+                await raw_source_element.send(for_id=step.id)
+                
                 return result.markdown
             else:
                 step.output = f"Failed to crawl. Status: {result.status_code}"
