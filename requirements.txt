@@ -3,3 +3,4 @@ chainlit
 crawl4ai
 duckduckgo_search
 python-dotenv
+asyncio
