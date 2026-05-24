@@ -1,6 +1,6 @@
 import chainlit as cl
 from tools import web_search_tool, scrape_source_tool
-
+import asyncio
 
 @cl.on_chat_start
 async def setup_command_center():
