@@ -1,82 +1,68 @@
+import os
 import asyncio
-import urllib.parse
-from bs4 import BeautifulSoup
+import httpx
 import chainlit as cl
-from playwright.async_api import async_playwright
 from crawl4ai import AsyncWebCrawler, BrowserConfig, CrawlerRunConfig, CacheMode
-
-
-def clean_ddg_url(raw_url: str) -> str:
-    """
-    DuckDuckGo HTML results use a redirect wrapper.
-    This decodes and extracts the actual destination URL.
-    """
-    if "uddg=" in raw_url:
-        parsed = urllib.parse.urlparse(raw_url)
-        queries = urllib.parse.parse_qs(parsed.query)
-        if "uddg" in queries:
-            return queries["uddg"][0]
-    if raw_url.startswith("//"):
-        raw_url = "https:" + raw_url
-    return raw_url
 
 
 async def web_search_tool(query: str, max_results: int = 3) -> list[dict]:
     """
-    Uses the container's Playwright engine to search DuckDuckGo safely,
-    bypassing cloud IP blocking, and parses the static HTML SERP.
+    Performs a web search using Tavily's Developer API.
+    Bypasses all datacenter blocks and returns optimized search results.
     """
-    async with cl.Step(name="🔍 Searching Web Directories", type="tool") as step:
+    async with cl.Step(name="🔍 Searching via Tavily AI", type="tool") as step:
         step.input = query
-        found = []
+
+        tavily_api_key = os.getenv("TAVILY_API_KEY")
+        if not tavily_api_key:
+            step.output = "Error: TAVILY_API_KEY is not set in the environment variables."
+            return []
+
+        url = "https://api.tavily.com/search"
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {tavily_api_key}"
+        }
+        payload = {
+            "query": query,
+            "max_results": max_results,
+            "search_depth": "basic"
+        }
+
         try:
-            # Leverage our native Playwright installation
-            async with async_playwright() as p:
-                browser = await p.chromium.launch(headless=True)
-                # Emulate a standard Windows Chrome browser session
-                context = await browser.new_context(
-                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-                )
-                page = await context.new_page()
+            # Fully async POST call using httpx (already standard in our environment)
+            async with httpx.AsyncClient() as client:
+                response = await client.post(url, json=payload, headers=headers, timeout=15.0)
 
-                # Fetch keyless HTML DuckDuckGo search page
-                encoded_query = urllib.parse.quote_plus(query)
-                search_url = f"https://html.duckduckgo.com/html/?q={encoded_query}"
+            if response.status_code == 200:
+                data = response.json()
+                results = data.get("results", [])
 
-                await page.goto(search_url, wait_until="domcontentloaded", timeout=15000)
-                content = await page.content()
-                await browser.close()
+                found = []
+                for r in results:
+                    found.append({
+                        "url": r.get("url"),
+                        "title": r.get("title", "Source")
+                    })
 
-            # Parse with BeautifulSoup
-            soup = BeautifulSoup(content, 'html.parser')
-            result_elements = soup.select("#links .result")
-
-            for elem in result_elements[:max_results]:
-                # Locate the result anchor tag
-                link_elem = elem.select_one(".result__title > a.result__a")
-                if link_elem:
-                    title = link_elem.get_text(strip=True)
-                    raw_href = link_elem.get("href", "")
-                    clean_url = clean_ddg_url(raw_href)
-                    found.append({"url": clean_url, "title": title})
-
-            # Feed success status back to Chainlit UI
-            if found:
-                urls_formatted = "\n".join([f"- [{r['title']}]({r['url']})" for r in found])
-                step.output = f"Discovered target URLs:\n{urls_formatted}"
+                if found:
+                    urls_formatted = "\n".join([f"- [{r['title']}]({r['url']})" for r in found])
+                    step.output = f"Discovered target URLs:\n{urls_formatted}"
+                else:
+                    step.output = "Tavily search returned no results."
+                return found
             else:
-                step.output = "No matches found on the search page."
+                step.output = f"Tavily API returned status code {response.status_code}: {response.text}"
+                return []
 
         except Exception as e:
-            step.output = f"Playwright Search Error: {str(e)}"
-            found = []
-
-        return found
+            step.output = f"Tavily Search Error: {str(e)}"
+            return []
 
 
 async def scrape_source_tool(url: str, source_title: str) -> str:
     """
-    Crawls a single webpage using Crawl4AI and displays live progress in the UI.
+    Crawls a target page using Crawl4AI and displays dynamic progress in Chainlit.
     """
     domain = url.split("//")[-1].split("/")[0]
 
@@ -92,7 +78,7 @@ async def scrape_source_tool(url: str, source_title: str) -> str:
                 word_count = len(result.markdown.split())
                 step.output = f"Successfully scraped {word_count} words of text context."
 
-                # Register in the collapsible side-inspection panel
+                # Render raw Markdown on the collapsible Side Panel
                 raw_source_element = cl.Text(
                     name=f"Source: {source_title}",
                     content=result.markdown,
