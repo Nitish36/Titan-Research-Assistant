@@ -1,0 +1,46 @@
+python -m chainlit run app.py
+
+This is a highly practical and standard architectural pattern in multi-agent systems, often referred to as **Agent Handoff** or a **Federated Agent Network**. 
+
+Connecting them is not only possible, but it is also an ideal design strategy because it prevents your SheetOps bot from becoming bloated. Keeping SheetOps focused on spreadsheets, project templates, and operations, while delegating open-ended web research and validation to Titan, makes both systems easier to maintain and update.
+
+Here is a conceptual breakdown of how this connection works, the options for bridging them, and what to consider from a design perspective:
+
+---
+
+### 1. How the Handoff Works Conceptually
+
+The interaction flow between the two bots would follow a structured delegation process:
+
+1. **The Trigger (Intent Classification):** A user asks the SheetOps bot: *"How do I set up a project pipeline in Smartsheet?"*
+2. **The Fallback Decision:** The SheetOps bot evaluates the query against its local tools and direct database knowledge. Realizing it does not have the native documentation or API tools to answer this, it flags the request as an *Escalation*.
+3. **The Delegation:** SheetOps packages the user's question and sends it over to Titan. It tells the user: *"I am consulting Titan, our deep-research engine, to fetch the most up-to-date documentation on this. This may take a moment..."*
+4. **The Execution:** Titan receives the request, runs its full pipeline (Tavily search, Crawl4AI scraping, Analyst synthesis, and Judge validation).
+5. **The Return:** Titan sends the final approved markdown report back to SheetOps, which then presents it to the user.
+
+---
+
+### 2. Architectural Options to Connect Them
+
+Depending on where these two bots are hosted, there are two primary ways to bridge them:
+
+* **Option A: The API Bridge (Decoupled Integration - Recommended)**
+  Since Titan is already deployed on Render, we can expose a simple, secure API endpoint on Titan's server. When SheetOps needs research, it makes a standard web request to Titan's URL, passes the query, and waits for the formatted markdown response. 
+  * *Why this is good:* It keeps both bots entirely independent. You can update or redeploy SheetOps without touching Titan, and vice versa.
+
+* **Option B: Shared Codebase (Coupled Integration)**
+  If you run both bots on the exact same server or codebase, SheetOps can simply import Titan’s research engine as a Python library.
+  * *Why this is good:* There is no network lag between the bots, and you don't have to manage web APIs or network security between Render services.
+
+---
+
+### 3. Key Design Considerations
+
+If we decide to link them, we must plan for two specific challenges:
+
+* **The Time Factor (Asynchronous UX):** 
+  Because Titan runs a deep pipeline (crawling several pages, running an LLM draft, and having a Judge grade it), it takes time to complete. We must ensure the SheetOps interface doesn't "timeout" or freeze while waiting. The handoff should be designed so SheetOps can display a loading status or notify the user when Titan's results are ready.
+* **Security & Authentication:** 
+  Since Titan is hosted on Render, we would need to secure its API endpoint with a simple API key or token so that only your authorized SheetOps bot can request research from it, preventing public overuse.
+
+This is a highly scalable way to grow your AI tools. It turns Titan into a utility or a "microservice" that any other bot you build in the future can query whenever they need search-and-verify capabilities.
