@@ -1,5 +1,5 @@
 import os
-import asyncio
+import docx
 import fitz
 import httpx
 import chainlit as cl
@@ -112,3 +112,28 @@ def extract_pdf_text(file_path: str) -> str:
         return "\n\n".join(extracted_text)
     except Exception as e:
         return f"Error reading PDF document: {str(e)}"
+
+def extract_docx_text(file_path: str) -> str:
+    """
+    Opens a .docx file and extracts text from all paragraphs and tables.
+    """
+    try:
+        doc = docx.Document(file_path)
+        extracted_content = []
+        
+        # 1. Parse standard paragraphs
+        for para in doc.paragraphs:
+            if para.text.strip():
+                extracted_content.append(para.text.strip())
+                
+        # 2. Parse tables (reconstructing cell rows with visual dividers)
+        for table in doc.tables:
+            for row in table.rows:
+                # Compile cells that contain text
+                row_text = [cell.text.strip() for cell in row.cells if cell.text.strip()]
+                if row_text:
+                    extracted_content.append(" | ".join(row_text))
+                    
+        return "\n\n".join(extracted_content)
+    except Exception as e:
+        return f"Error reading Word document: {str(e)}"

@@ -1,6 +1,6 @@
 import asyncio
 import chainlit as cl
-from tools import web_search_tool, scrape_source_tool, extract_pdf_text
+from tools import web_search_tool, scrape_source_tool, extract_pdf_text,extract_docx_text
 from agent import run_analyst_agent, run_judge_agent
 
 @cl.on_chat_start
@@ -20,7 +20,14 @@ async def setup_command_center():
             label=" PDF Summarizer",
             tooltip="Summarizes the PDF on behalf of the user.",
             icon="sheet"
-        )
+        ),
+        cl.Action(
+            name="word_summarizer", 
+            payload={"value": "activate"},  
+            label="📝 Word Summarizer", 
+            tooltip="Upload a .docx file and generate an executive summary.",
+            icon="file-text"
+     )
     ]
     
     await cl.Message(
@@ -195,6 +202,70 @@ async def on_pdf_summarizer_click(action: cl.Action):
     await cl.Message(
         content=(
             f"## 📋 Document Executive Summary\n"
+            f"**File Name:** `{uploaded_file.name}`\n"
+            f"**Total Words Parsed:** `{word_count}`\n"
+            f"**Analysis Engine:** `Titan-Analyst` (Gemini)\n\n"
+            f"---\n\n"
+            f"{summary_report}"
+        )
+    ).send()
+
+@cl.action_callback("word_summarizer")
+async def on_word_summarizer_click(action: cl.Action):
+    """
+    Triggers when the Word Document Summarizer button is clicked.
+    Prompts the user to upload a .docx file and generates an executive summary.
+    """
+    await action.remove()
+    
+    # 1. Ask the user to upload a Word file
+    files = await cl.AskFileMessage(
+        content="📝 **Titan Word Summarizer Activated**\n\nPlease upload the Word Document (.docx) you would like me to summarize:",
+        accept=["application/vnd.openxmlformats-officedocument.wordprocessingml.document"],
+        max_size_mb=20,
+        timeout=300 # Wait up to 5 minutes
+    ).send()
+    
+    if not files:
+        return
+        
+    uploaded_file = files[0]
+    
+    # 2. Extract text from the Word file
+    async with cl.Step(name="📑 Parsing Word Document with python-docx") as step:
+        step.input = uploaded_file.name
+        
+        # Extract paragraph and table data using our helper
+        docx_text = extract_docx_text(uploaded_file.path)
+        word_count = len(docx_text.split())
+        
+        if "Error reading Word document" in docx_text or word_count < 10:
+            step.output = "Failed to extract readable text content from the document."
+            await cl.Message(content="❌ Titan could not parse the uploaded Word file. Please make sure the document is not corrupted or password-protected.").send()
+            return
+            
+        step.output = f"Successfully parsed {word_count} words of document content."
+
+    # 3. Call the Analyst Agent to process the text
+    async with cl.Step(name="🤖 Analyst Agent (Generating Word Document Summary)") as step:
+        step.input = f"Word file content ({word_count} words)"
+        
+        summary_instruction = (
+            "Analyze the following document text and compile a highly structured, "
+            "comprehensive Executive Summary. Break it down into key findings, "
+            "core topics discussed, data tables (if any), and critical recommendations."
+        )
+        
+        summary_report = await run_analyst_agent(
+            query=summary_instruction,
+            raw_context=docx_text
+        )
+        step.output = "Summary generation complete."
+
+    # 4. Output the final summary report
+    await cl.Message(
+        content=(
+            f"## 📋 Word Document Executive Summary\n"
             f"**File Name:** `{uploaded_file.name}`\n"
             f"**Total Words Parsed:** `{word_count}`\n"
             f"**Analysis Engine:** `Titan-Analyst` (Gemini)\n\n"
