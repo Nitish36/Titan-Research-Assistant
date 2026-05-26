@@ -20,7 +20,8 @@ if not API_KEY:
 # Create the standard client pointing to our chosen provider
 client = AsyncOpenAI(
     api_key=API_KEY,
-    base_url=BASE_URL
+    base_url=BASE_URL,
+    timeout=1000.0
 )
 
 # Generate a model instance compatible with the OpenAI Agents SDK

@@ -1,5 +1,6 @@
 import os
 import asyncio
+import fitz
 import httpx
 import chainlit as cl
 from crawl4ai import AsyncWebCrawler, BrowserConfig, CrawlerRunConfig, CacheMode
@@ -91,3 +92,23 @@ async def scrape_source_tool(url: str, source_title: str) -> str:
             else:
                 step.output = f"Failed to crawl. Status: {result.status_code}"
                 return ""
+
+
+def extract_pdf_text(file_path: str) -> str:
+    """
+    Opens a PDF file from a local path and extracts plain text from all pages.
+    """
+    try:
+        # Open the PDF using PyMuPDF
+        doc = fitz.open(file_path)
+        extracted_text = []
+
+        # Iterate through pages and extract text
+        for page_num, page in enumerate(doc, start=1):
+            text = page.get_text()
+            extracted_text.append(f"--- Page {page_num} ---\n{text}")
+
+        doc.close()
+        return "\n\n".join(extracted_text)
+    except Exception as e:
+        return f"Error reading PDF document: {str(e)}"

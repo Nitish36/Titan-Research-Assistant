@@ -1,6 +1,6 @@
 import asyncio
 import chainlit as cl
-from tools import web_search_tool, scrape_source_tool
+from tools import web_search_tool, scrape_source_tool, extract_pdf_text
 from agent import run_analyst_agent, run_judge_agent
 
 @cl.on_chat_start
@@ -15,11 +15,11 @@ async def setup_command_center():
             icon="search"
         ),
         cl.Action(
-            name="sheet_ops", 
+            name="pdf_summarizer",
             payload={"value": "activate"},  
-            label="📊 SheetOps Toolkit", 
-            tooltip="Run structured spreadsheet updates.",
-            icon="table"
+            label=" PDF Summarizer",
+            tooltip="Summarizes the PDF on behalf of the user.",
+            icon="sheet"
         )
     ]
     
@@ -133,6 +133,73 @@ async def on_research_agent_click(action: cl.Action):
             f"**Iterations Executed:** `{iteration}`\n\n"
             f"---\n\n"
             f"{draft_report}"
+        )
+    ).send()
+
+
+@cl.action_callback("pdf_summarizer")
+async def on_pdf_summarizer_click(action: cl.Action):
+    """
+    Triggers when the PDF Summarizer button is clicked.
+    Prompts the user to upload a PDF file and drafts an executive summary.
+    """
+    await action.remove()
+
+    # 1. Ask the user to upload a PDF file (blocks until they upload or timeout)
+    files = await cl.AskFileMessage(
+        content="📄 **Titan PDF Summarizer Activated**\n\nPlease upload the PDF document (Max 20MB) you would like me to summarize:",
+        accept=["application/pdf"],
+        max_size_mb=20,
+        timeout=300  # Wait up to 5 minutes
+    ).send()
+
+    if not files:
+        return
+
+    uploaded_file = files[0]
+
+    # 2. Extract text from the uploaded PDF
+    async with cl.Step(name="📑 Parsing PDF with PyMuPDF") as step:
+        step.input = uploaded_file.name
+
+        # uploaded_file.path holds the temporary local file path on the server
+        pdf_text = extract_pdf_text(uploaded_file.path)
+        word_count = len(pdf_text.split())
+
+        if "Error reading PDF" in pdf_text or word_count < 10:
+            step.output = "Failed to extract readable text content from the document."
+            await cl.Message(
+                content="❌ Titan could not parse the uploaded PDF. Please make sure the document is not password-protected or scanned without text layers.").send()
+            return
+
+        step.output = f"Successfully parsed {word_count} words of document content."
+
+    # 3. Call the Analyst Agent to summarize the text
+    async with cl.Step(name="🤖 Analyst Agent (Generating Summary)") as step:
+        step.input = f"PDF content ({word_count} words)"
+
+        # Provide specialized instruction to the analyst for this specific task
+        summary_instruction = (
+            "Analyze the following document text and compile a highly structured, "
+            "comprehensive Executive Summary. Break it down into key findings, "
+            "methodology, core data points/metrics, and critical recommendations."
+        )
+
+        summary_report = await run_analyst_agent(
+            query=summary_instruction,
+            raw_context=pdf_text
+        )
+        step.output = "Summary generation complete."
+
+    # 4. Present the final summary report
+    await cl.Message(
+        content=(
+            f"## 📋 Document Executive Summary\n"
+            f"**File Name:** `{uploaded_file.name}`\n"
+            f"**Total Words Parsed:** `{word_count}`\n"
+            f"**Analysis Engine:** `Titan-Analyst` (Gemini)\n\n"
+            f"---\n\n"
+            f"{summary_report}"
         )
     ).send()
 
